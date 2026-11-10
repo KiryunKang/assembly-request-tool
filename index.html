@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>과천 국가공무원인재개발원 오시는 길</title>
+  <style>
+    :root { --navy:#16324f; --blue:#2563eb; --sky:#eff6ff; --ink:#172033; --muted:#64748b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif; color:var(--ink); background:#f6f8fb; line-height:1.6; }
+    .wrap { max-width:760px; margin:auto; padding:24px 16px 44px; }
+    .hero { padding:28px 24px; border-radius:20px; color:white; background:linear-gradient(135deg,#16324f,#2563eb); box-shadow:0 12px 30px #16324f2b; }
+    .eyebrow { margin:0 0 6px; font-size:.85rem; opacity:.8; }
+    h1 { margin:0; font-size:clamp(1.6rem,5vw,2.35rem); line-height:1.25; }
+    .hero p { margin:12px 0 0; opacity:.92; }
+    .card { margin-top:16px; padding:22px; border-radius:16px; background:white; box-shadow:0 4px 16px #0f172a0d; }
+    h2 { margin:0 0 14px; font-size:1.15rem; }
+    .address { display:flex; gap:10px; align-items:flex-start; font-size:1.05rem; font-weight:700; }
+    .address span { color:var(--blue); }
+    .sub { margin:4px 0 0 28px; color:var(--muted); font-size:.9rem; }
+    .buttons { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:18px; }
+    a.btn, button.btn { display:block; padding:12px 8px; border:0; border-radius:10px; text-align:center; text-decoration:none; font:inherit; font-weight:700; cursor:pointer; }
+    .primary { color:white; background:var(--blue); }
+    .secondary { color:var(--navy); background:var(--sky); }
+    .route { display:grid; grid-template-columns:48px 1fr; gap:14px; align-items:start; padding:12px 0; border-bottom:1px solid #e5e7eb; }
+    .route:last-child { border-bottom:0; padding-bottom:0; }
+    .icon { display:grid; place-items:center; width:44px; height:44px; border-radius:12px; background:var(--sky); font-size:1.35rem; }
+    .route h3 { margin:0 0 3px; font-size:1rem; }
+    .route p { margin:0; color:var(--muted); font-size:.94rem; }
+    .tip { margin-top:16px; padding:12px 14px; border-left:4px solid #f59e0b; border-radius:8px; background:#fffbeb; font-size:.9rem; }
+    footer { margin-top:22px; color:var(--muted); text-align:center; font-size:.82rem; }
+    @media (max-width:500px) { .buttons { grid-template-columns:1fr; } .hero,.card { padding:20px; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <p class="eyebrow">방문 안내</p>
+      <h1>과천 국가공무원인재개발원</h1>
+      <p>대중교통과 자동차로 편하게 찾아오세요.</p>
+    </section>
+
+    <section class="card">
+      <h2>목적지</h2>
+      <div class="address"><span>📍</span><div>경기도 과천시 교육원로 118</div></div>
+      <p class="sub">국가공무원인재개발원 과천캠퍼스</p>
+      <div class="buttons">
+        <a class="btn primary" href="https://map.naver.com/p/search/%EA%B5%AD%EA%B0%80%EA%B3%B5%EB%AC%B4%EC%9B%90%EC%9D%B8%EC%9E%AC%EA%B0%9C%EB%B0%9C%EC%9B%90%20%EA%B3%BC%EC%B2%9C" target="_blank" rel="noopener">네이버지도</a>
+        <a class="btn secondary" href="https://map.kakao.com/?q=%EA%B5%AD%EA%B0%80%EA%B3%B5%EB%AC%B4%EC%9B%90%EC%9D%B8%EC%9E%AC%EA%B0%9C%EB%B0%9C%EC%9B%90%20%EA%B3%BC%EC%B2%9C" target="_blank" rel="noopener">카카오맵</a>
+        <button class="btn secondary" onclick="startRoute()">현재 위치에서 길찾기</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>대중교통으로 오기</h2>
+      <div class="route"><div class="icon">🚇</div><div><h3>지하철 4호선</h3><p>정부과천청사역에서 하차한 뒤, 6번 출구 방향에서 목적지까지 도보 또는 지도 앱을 이용하세요.</p></div></div>
+      <div class="route"><div class="icon">🚌</div><div><h3>버스</h3><p>‘정부과천청사’ 또는 ‘교육원삼거리’ 인근 정류장에서 하차 후 도보 이동하세요.</p></div></div>
+    </section>
+
+    <section class="card">
+      <h2>자동차로 오기</h2>
+      <div class="route"><div class="icon">🚗</div><div><h3>내비게이션 검색</h3><p>‘국가공무원인재개발원 과천캠퍼스’ 또는 ‘경기도 과천시 교육원로 118’을 검색하세요.</p></div></div>
+      <div class="tip">출발 전 교통 상황과 주차 가능 여부를 지도 앱에서 확인하면 더욱 편리합니다.</div>
+    </section>
+
+    <footer>주소 및 위치 정보는 방문 전 공식 안내를 다시 확인해 주세요.</footer>
+  </main>
+  <script>
+    function startRoute() {
+      const destination = encodeURIComponent('경기도 과천시 교육원로 118');
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          p => location.href = `https://www.google.com/maps/dir/?api=1&origin=${p.coords.latitude},${p.coords.longitude}&destination=${destination}`,
+          () => location.href = `https://map.naver.com/p/directions/-/-/${destination}`
+        );
+      } else {
+        location.href = `https://map.naver.com/p/search/${destination}`;
+      }
+    }
+  </script>
+</body>
+</html>

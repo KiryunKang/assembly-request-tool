@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>국회 요구자료 대응 — 시작</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>국회 요구자료 대응</h1><nav id="nav"></nav></header>
+<main>
+  <section>
+    <h2>처리 현황</h2>
+    <div class="cards" id="cards"></div>
+    <p class="hint">기록은 지금 이 브라우저에만 저장됩니다(S6에서 서버 저장으로 바꿉니다).</p>
+  </section>
+  <section>
+    <h2>요구서별 현황</h2>
+    <div class="scroll"><table><thead><tr><th>위원회</th><th>의원</th><th>제출기한</th><th>문항</th><th>접수</th><th>배분확정</th></tr></thead><tbody id="byReq"></tbody></table></div>
+  </section>
+  <section>
+    <h2>최근 처리 기록</h2>
+    <div class="scroll" style="max-height:300px"><table><thead><tr><th>일시</th><th>작업</th><th>문항</th><th>과</th></tr></thead><tbody id="log"></tbody></table></div>
+    <div class="row" style="margin-top:10px"><button id="clear">이 브라우저의 기록 모두 지우기</button><span class="hint">시험할 때만 쓰세요.</span></div>
+  </section>
+</main>
+<script src="common.js"></script>
+<script>
+App.nav("index.html");
+function draw() {
+  const db = App.load(), e = App.esc;
+  const n = (s) => db.cases.filter((c) => c.상태 === s).length;
+  document.getElementById("cards").innerHTML =
+    `<div class="card">전체 문항<b>${db.cases.length}</b></div>` +
+    App.STATES.map((s) => `<div class="card"><span class="badge st-${s}">${s}</span><b>${n(s)}</b></div>`).join("");
+  const g = new Map();
+  for (const c of db.cases) {
+    const k = c.파일명;
+    const v = g.get(k) || { c, 전체: 0, 접수: 0, 배분확정: 0 };
+    v.전체++; if (c.상태 === "접수") v.접수++; if (c.상태 === "배분확정") v.배분확정++;
+    g.set(k, v);
+  }
+  document.getElementById("byReq").innerHTML = [...g.values()].map((v) =>
+    `<tr><td>${e(v.c.위원회)}</td><td>${e(v.c.의원)}</td><td>${e(v.c.제출기한)}</td><td>${v.전체}</td><td>${v.접수}</td><td>${v.배분확정}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="hint">아직 접수한 요구서가 없습니다. 「배분」 화면에서 요구서 PDF를 올리세요.</td></tr>`;
+  document.getElementById("log").innerHTML = db.log.slice(-30).reverse().map((l) =>
+    `<tr><td>${e(l.일시)}</td><td>${e(l.작업)}</td><td>${e(l.문항)}</td><td>${e(l.과)}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="hint">기록 없음</td></tr>`;
+}
+document.getElementById("clear").onclick = () => {
+  if (confirm("이 브라우저에 저장된 접수·배분 기록을 모두 지웁니다. 계속할까요?")) { App.clearAll(); draw(); }
+};
+draw();
+</script>
+</body>
+</html>
