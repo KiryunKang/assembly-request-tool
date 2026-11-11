@@ -8,7 +8,8 @@
   "use strict";
 
   // CSV 글자 → 객체 배열. 따옴표("…, …") 안의 쉼표·줄바꿈과 "" 이스케이프를 처리한다.
-  function parseCSV(text) {
+  // keepSpace=true면 값 앞뒤 공백을 지우지 않는다(S8 표기 점검용).
+  function parseCSV(text, keepSpace) {
     text = String(text).replace(/^﻿/, "");          // utf-8-sig 머리 표시 제거
     const rows = [];
     let row = [], cell = "", q = false;
@@ -29,7 +30,7 @@
     const head = rows.shift().map((h) => h.trim());
     return rows
       .filter((r) => r.some((v) => v.trim() !== ""))
-      .map((r) => Object.fromEntries(head.map((h, k) => [h, (r[k] || "").trim()])));
+      .map((r) => Object.fromEntries(head.map((h, k) => [h, keepSpace ? (r[k] || "") : (r[k] || "").trim()])));
   }
 
   const splitBar = (s) => String(s || "").split("|").map((x) => x.trim()).filter(Boolean);

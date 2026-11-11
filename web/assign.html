@@ -164,7 +164,7 @@ function rowHtml(c) {
     const done = c.확정방법 ? `<div class="hint">${e(c.확정방법)} · ${e(c.일시)}</div>` : "";
     return `<tr data-id="${e(c.id)}">
       <td><span class="badge st-${e(c.상태)}">${e(c.상태)}</span>${reHtml}${replyInfo(c)}</td>
-      <td><b>${e(c.id)}</b><div class="hint">${e(c.위원회)}</div><div class="hint">기한 ${e(c.제출기한)}</div></td>
+      <td><b class="nowrap">${e(c.id)}</b><div class="hint">${e(c.위원회)}</div><div class="hint nowrap">기한 ${e(c.제출기한)}</div></td>
       <td>${e(c.요구내용)}${sub}</td>
       <td>${candHtml}</td>
       <td>${App.historyHtml(App.history(cand))}</td>

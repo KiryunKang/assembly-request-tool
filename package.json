@@ -3,7 +3,7 @@
   "private": true,
   "description": "국회 요구자료 대응 공통 툴 (교육용)",
   "scripts": {
-    "test": "node test_engine.js && node test_api.js"
+    "test": "node test_engine.js data/rules_보강.csv && node test_api.js && node test_validate.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.9.0"

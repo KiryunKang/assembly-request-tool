@@ -131,6 +131,23 @@ async function expectReject(name, body, status) {
   const lastLog = JSON.parse(store.text).log.slice(-1)[0];
   check("AI 후보를 수정해 확정 → 처리 기록에 확정방법 수정", r.status === 200 && lastLog.작업 === "배분" && lastLog.비고 === "확정방법 수정", JSON.stringify(lastLog));
 
+  // ── 보완요청·확정(S8) ─────────────────────────────────
+  // 의원K-01은 위에서 산업정책과·디지털정책과가 회신해 회신완료 상태
+  await expectReject("409 회신완료 전(배분확정) 문항 확정", { 작업: "확정", id: "의원K-03", 코멘트: "확인" }, 409);
+  await expectReject("400 보완 사유 없음", { 작업: "보완요청", id: A, 과: ["산업정책과"], 사유: "" }, 400);
+  await expectReject("400 회신 안 한 과에 보완요청", { 작업: "보완요청", id: A, 과: ["운영지원과"], 사유: "합계" }, 400);
+  r = await call("POST", { 작업: "보완요청", id: A, 과: ["산업정책과"], 사유: "합계 행이 세부 합과 다름" });
+  check("보완요청 → 보완요청", r.status === 200 && r.body.상태 === "보완요청", r.body.상태);
+  await expectReject("403 보완 대상 아닌 과(디지털정책과)가 다시 회신", { 작업: "회신", id: A, 과: "디지털정책과", 메모: "다시" }, 403);
+  await expectReject("409 보완요청 중 확정", { 작업: "확정", id: A, 코멘트: "확인" }, 409);
+  r = await call("POST", { 작업: "회신", id: A, 과: "산업정책과", 파일명: "회신_산업정책과_보완.xlsx", 행: [["요구"], ["연도", "예산(천원)"], [2024, 1000]], 확인필요: [] });
+  check("보완 대상 과 재회신 → 회신완료", r.status === 200 && r.body.상태 === "회신완료", r.body.상태);
+  await expectReject("400 확정 코멘트 없음", { 작업: "확정", id: A, 코멘트: " " }, 400);
+  r = await call("POST", { 작업: "확정", id: A, 코멘트: "합계 보완 확인, 제출본 반영" });
+  const cA = JSON.parse(store.text).cases.find((c) => c.id === A);
+  check("확정 → 확정, 보완 이력 남음", r.status === 200 && r.body.상태 === "확정" && cA.보완이력.length === 1 && cA.확정코멘트.includes("합계"), `${r.body.상태} · 보완이력 ${cA.보완이력.length}`);
+  await expectReject("409 확정된 문항에 회신", { 작업: "회신", id: A, 과: "산업정책과", 메모: "x" }, 409);
+
   r = await call("GET");
   const st = {}; for (const c of r.body.cases) st[c.상태] = (st[c.상태] || 0) + 1;
   check("마지막 조회", r.status === 200 && r.body.cases.length === 78, JSON.stringify(st) + ` · 기록 ${r.body.log.length}줄`);

@@ -15,7 +15,7 @@
     ["index.html", "시작 화면"],
     ["assign.html", "배분"],
     ["dept.html", "현업 회신"],
-    ["collect.html", "취합", "S8"],
+    ["collect.html", "취합"],
   ];
   function nav(active) {
     const el = document.getElementById("nav");

@@ -16,7 +16,7 @@
   </section>
   <section>
     <h2>요구서별 현황</h2>
-    <div class="scroll"><table><thead><tr><th>위원회</th><th>의원</th><th>제출기한</th><th>문항</th><th>접수</th><th>배분확정</th><th>회신중</th><th>회신완료</th><th>재배정요청</th></tr></thead><tbody id="byReq"></tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>위원회</th><th>의원</th><th>제출기한</th><th>문항</th><th>접수</th><th>배분확정</th><th>회신중</th><th>회신완료</th><th>보완요청</th><th>확정</th><th>재배정요청</th></tr></thead><tbody id="byReq"></tbody></table></div>
   </section>
   <section>
     <h2>최근 처리 기록</h2>
@@ -28,7 +28,7 @@
 <script src="common.js"></script>
 <script>
 App.nav("index.html");
-const K = ["접수", "배분확정", "회신중", "회신완료", "재배정요청"];
+const K = ["접수", "배분확정", "회신중", "회신완료", "보완요청", "확정", "재배정요청"];
 async function draw() {
   const e = App.esc;
   document.getElementById("where").textContent = App.SERVER
@@ -50,7 +50,7 @@ async function draw() {
   }
   document.getElementById("byReq").innerHTML = [...g.values()].map((v) =>
     `<tr><td>${e(v.c.위원회)}</td><td>${e(v.c.의원)}</td><td>${e(v.c.제출기한)}</td><td>${v.전체}</td>` + K.map((s) => `<td>${v[s] || 0}</td>`).join("") + `</tr>`).join("")
-    || `<tr><td colspan="9" class="hint">아직 접수한 요구서가 없습니다. 「배분」 화면에서 요구서 PDF를 올리세요.</td></tr>`;
+    || `<tr><td colspan="11" class="hint">아직 접수한 요구서가 없습니다. 「배분」 화면에서 요구서 PDF를 올리세요.</td></tr>`;
   document.getElementById("log").innerHTML = db.log.slice(-30).reverse().map((l) =>
     `<tr><td>${e(l.일시)}</td><td>${e(l.작업)}</td><td>${e(l.문항)}</td><td>${e(l.과)}${l.비고 ? ` <small class="hint">(${e(l.비고)})</small>` : ""}</td></tr>`).join("")
     || `<tr><td colspan="4" class="hint">기록 없음</td></tr>`;

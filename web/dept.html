@@ -28,6 +28,7 @@
 <script src="lib/xlsx.full.min.js"></script>
 <script src="engine.js"></script>
 <script src="flow.js"></script>
+<script src="validate.js"></script>
 <script src="common.js"></script>
 <script>
 "use strict";
@@ -35,7 +36,7 @@ App.nav("dept.html");
 const $ = (id) => document.getElementById(id), e = App.esc;
 const PREF = "국회요구자료_내과";
 let eng = null, cur = { cases: [], log: [] };
-const files = {};   // 문항 id → {파일명, 행}  (올렸지만 아직 제출 안 한 엑셀)
+const files = {};   // 문항 id → {파일명, 행, 확인필요}  (올렸지만 아직 제출 안 한 엑셀)
 
 function msg(text, err) { $("msg").innerHTML = text ? `<div class="msg ${err ? "err" : ""}">${e(text)}</div>` : ""; window.scrollTo(0, 0); }
 const OPEN = ["배분확정", "회신중", "보완요청"];   // 회신·재배정 요청을 할 수 있는 상태
@@ -54,11 +55,22 @@ function rowsTable(rows) {
     `</tbody></table></div>` + (rows.length > show.length ? `<div class="hint">… 모두 ${rows.length}행</div>` : "");
 }
 
+// 회신 엑셀 점검 결과(처리지침 제4·5장). 값은 고치지 않고 확인필요만 보여 준다.
+function issuesHtml(list) {
+  if (!list) return "";
+  if (!list.length) return `<div class="ok" style="margin-top:4px">점검 결과: 확인필요 없음</div>`;
+  return `<div class="issues"><b>확인필요 ${list.length}건</b> — 고칠 수 있으면 엑셀을 고쳐 다시 올리고, 사유가 있으면 메모에 적어 제출하세요.<ul>` +
+    list.map((x) => `<li>${x.행 ? `${x.행}행 · ` : ""}<b>${e(x.항목)}</b> ${e(x.내용)}</li>`).join("") + `</ul></div>`;
+}
+function pendHtml(p) {
+  return p ? `<div class="hint">올린 파일: ${e(p.파일명)} (${p.행.length}행) — 아직 제출 전입니다.</div>${issuesHtml(p.확인필요)}${rowsTable(p.행)}` : "";
+}
+
 function draw() {
   const me = $("myDept").value;
   if (!me) { $("cards").innerHTML = `<section><p class="hint">위에서 내 과를 고르면 그 과에 배분된 문항만 보입니다.</p></section>`; $("count").textContent = ""; return; }
   const mine = cur.cases.filter((c) => c.상태 !== "접수" && Flow.담당과(c).includes(me));
-  const todo = mine.filter((c) => OPEN.includes(c.상태) && !(c.회신 && c.회신[me] && c.상태 !== "보완요청"));
+  const todo = mine.filter((c) => OPEN.includes(c.상태) && (c.상태 === "보완요청" ? c.보완 && c.보완.남은과.includes(me) : !(c.회신 && c.회신[me])));
   const list = $("showDone").checked ? mine : todo;
   $("count").textContent = `회신할 문항 ${todo.length} · 내 과 담당 전체 ${mine.length}`;
   if (!list.length) { $("cards").innerHTML = `<section><p class="hint">${e(me)}에 회신할 문항이 없습니다.</p></section>`; return; }
@@ -67,7 +79,9 @@ function draw() {
     const role = c.주관과 === me ? "주관" : "협조";
     const others = Flow.담당과(c).map((d) => `${e(d)}${d === c.주관과 ? "(주관)" : ""} ${c.회신 && c.회신[d] ? '<span class="ok">회신</span>' : '<span class="hint">미회신</span>'}`).join(" · ");
     const my = c.회신 && c.회신[me];
-    const myHtml = my ? `<div class="mine"><b>내 회신</b> ${e(my.일시)} · ${e(my.파일명 || "엑셀 없음")}${my.메모 ? ` · 메모: ${e(my.메모)}` : ""}${rowsTable(my.행)}</div>` : "";
+    const myHtml = my ? `<div class="mine"><b>내 회신</b> ${e(my.일시)} · ${e(my.파일명 || "엑셀 없음")}${my.메모 ? ` · 메모: ${e(my.메모)}` : ""}${my.확인필요 && my.확인필요.length ? ` · <span class="warn">확인필요 ${my.확인필요.length}건</span>` : ""}${rowsTable(my.행)}</div>` : "";
+    const bo = c.상태 === "보완요청" && c.보완 && c.보완.과.includes(me)
+      ? `<div class="re" style="margin-top:8px"><b>보완 요청</b> ${e(c.보완.일시)} — ${e(c.보완.사유)}<br>엑셀을 고쳐 다시 회신하세요.${c.보완.남은과.includes(me) ? "" : " (이미 다시 회신함)"}</div>` : "";
     const can = OPEN.includes(c.상태);
     const pend = files[c.id];
     const form = can ? `
@@ -76,7 +90,7 @@ function draw() {
         <input type="text" class="memo" placeholder="메모(예: 해당 자료 없음)" style="flex:1;min-width:220px">
         <button class="primary send">${my ? "회신 다시 제출" : "회신 제출"}</button>
       </div>
-      <div class="pend">${pend ? `<div class="hint">올린 파일: ${e(pend.파일명)} (${pend.행.length}행) — 아직 제출 전입니다.</div>${rowsTable(pend.행)}` : ""}</div>
+      <div class="pend">${pendHtml(pend)}</div>
       <details class="co"><summary>소관이 아니면: 재배정 요청</summary>
         <div class="row" style="margin-top:6px">
           <input type="text" class="why" placeholder="사유(필수)" style="flex:1;min-width:220px">
@@ -92,7 +106,7 @@ function draw() {
       <div>${e(c.요구내용)}</div>
       ${[c.세부항목, c.비고].filter(Boolean).map((x) => `<div class="hint">${e(x)}</div>`).join("")}
       <div style="margin-top:6px">${App.historyHtml(App.history(eng.classify(c.요구내용)))}</div>
-      ${myHtml}${form}
+      ${bo}${myHtml}${form}
     </section>`;
   }).join("");
 }
@@ -110,16 +124,21 @@ $("cards").onchange = async (ev) => {
     const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const 행 = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", blankrows: false });
-    files[id] = { 파일명: f.name, 행 };
-    card.querySelector(".pend").innerHTML = `<div class="hint">올린 파일: ${e(f.name)} (${행.length}행) — 아직 제출 전입니다.</div>${rowsTable(행)}`;
+    const c = cur.cases.find((x) => x.id === id);
+    const 확인필요 = Validate.checkReply(행, { 요구내용: c.요구내용, 기준연도: Number(String(c.제출기한).slice(0, 4)) || new Date().getFullYear() });
+    files[id] = { 파일명: f.name, 행, 확인필요 };
+    card.querySelector(".pend").innerHTML = pendHtml(files[id]);
   } catch (err) { msg(`엑셀을 읽지 못했습니다: ${err.message}`, true); }
 };
 
 $("cards").onclick = async (ev) => {
   const btn = ev.target.closest("button.send, button.ask"); if (!btn) return;
   const card = btn.closest(".case"), id = card.dataset.id, me = $("myDept").value;
+  const p = files[id];
+  if (btn.classList.contains("send") && p && p.확인필요.length &&
+      !confirm(`확인필요 ${p.확인필요.length}건이 있습니다.\n\n` + p.확인필요.map((x) => `· ${x.항목}: ${x.내용}`).join("\n") + "\n\n고치지 않고 이대로 제출할까요? (사유는 메모에 적어 주세요)")) return;
   const req = btn.classList.contains("send")
-    ? { 작업: "회신", id, 과: me, 파일명: files[id]?.파일명 || "", 행: files[id]?.행 || [], 메모: card.querySelector(".memo").value }
+    ? { 작업: "회신", id, 과: me, 파일명: p?.파일명 || "", 행: p?.행 || [], 확인필요: p?.확인필요 || [], 메모: card.querySelector(".memo").value }
     : { 작업: "재배정요청", id, 과: me, 사유: card.querySelector(".why").value, 희망과: card.querySelector(".want").value };
   btn.disabled = true;
   try {

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>국회 요구자료 대응 — 취합</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>국회 요구자료 대응</h1><nav id="nav"></nav></header>
+<main>
+  <div id="msg"></div>
+  <div class="tabs"><button data-tab="check" class="on">검사·확정</button><button data-tab="stat">현황·제출본</button></div>
+
+  <div id="tab-check">
+    <section>
+      <h2>문항별 취합 — 과별 회신을 합치고 확인필요를 판단합니다</h2>
+      <div class="row">
+        <label>상태 <select id="fState">
+          <option value="회신">회신이 들어온 문항(회신중·회신완료·보완요청·확정)</option>
+          <option>회신중</option><option>회신완료</option><option>보완요청</option><option>확정</option>
+        </select></label>
+        <button id="reload">새로 고침</button>
+        <span class="hint" id="count"></span>
+      </div>
+      <p class="hint">확인필요는 처리지침 제4·5장 규칙(연도 누락 · 집행액&gt;예산(비고 없음) · 합계 불일치 · 양식)으로 저장된 회신을 다시 점검한 결과입니다. 값은 고치지 않습니다. 고쳐야 하면 [보완요청]으로 그 과에만 다시 회신을 받고, 사유가 확인되면 코멘트를 남겨 [확인 완료]로 확정합니다. 확정한 문항만 제출본에 들어갑니다.</p>
+    </section>
+    <div id="cases"></div>
+
+    <section>
+      <h2>검증용 접수대장 점검</h2>
+      <div class="row">
+        <label>접수대장 CSV <input type="file" id="ledger" accept=".csv"></label>
+        <span class="hint">조직도에 없는 부서명 · 빈칸 · 기간 역전 · 날짜 형식 · 기한이 접수일보다 빠름 · 중복 접수 · 표기(공백)</span>
+      </div>
+      <div id="ledgerOut"></div>
+    </section>
+  </div>
+
+  <div id="tab-stat" hidden>
+    <section>
+      <h2>처리 현황</h2>
+      <div class="cards" id="cards"></div>
+    </section>
+    <section>
+      <h2>과별 현황(주관 과 기준)</h2>
+      <div class="chartbox"><canvas id="chart"></canvas></div>
+    </section>
+    <section>
+      <h2>제출본</h2>
+      <p class="hint">「확정」 문항만 담습니다. 엑셀은 제출목록 시트 + 문항별 취합표 시트, Markdown은 같은 내용을 한 파일로 만듭니다. 과장 결재와 국회 제출은 도구 밖에서 합니다(처리지침 제6장).</p>
+      <div class="row"><button class="primary" id="xlsx">제출본 엑셀</button><button id="md">제출본 Markdown</button><span class="hint" id="subHint"></span></div>
+      <div id="subList"></div>
+    </section>
+  </div>
+</main>
+
+<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/chart.umd.min.js"></script>
+<script src="engine.js"></script>
+<script src="flow.js"></script>
+<script src="validate.js"></script>
+<script src="common.js"></script>
+<script>
+"use strict";
+App.nav("collect.html");
+const $ = (id) => document.getElementById(id), e = App.esc;
+let eng = null, cur = { cases: [], log: [] }, chart = null;
+const REPLIED = ["회신중", "회신완료", "보완요청", "확정"];
+
+function msg(text, err) { $("msg").innerHTML = text ? `<div class="msg ${err ? "err" : ""}">${e(text)}</div>` : ""; if (text) window.scrollTo(0, 0); }
+const 기준연도 = (c) => Number(String(c.제출기한).slice(0, 4)) || new Date().getFullYear();
+// 저장된 회신을 다시 점검한다(화면에서 올릴 때 점검한 결과를 믿지 않고 같은 규칙으로 다시 계산)
+function issues(c, 과) {
+  const v = (c.회신 || {})[과];
+  return v && v.행 && v.행.length ? Validate.checkReply(v.행, { 요구내용: c.요구내용, 기준연도: 기준연도(c) }) : [];
+}
+function table(head, rows, max) {
+  const show = max ? rows.slice(0, max) : rows;
+  return `<div class="scroll" style="max-height:360px;margin-top:8px"><table><thead><tr>${head.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>` +
+    show.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("") + `</tbody></table></div>`;
+}
+
+// ── 검사·확정 ───────────────────────────────────────────
+function caseHtml(c) {
+  const all = Flow.담당과(c);
+  const got = all.filter((d) => c.회신 && c.회신[d]);
+  const notYet = all.filter((d) => !got.includes(d));
+  const per = all.map((d) => {
+    const v = c.회신 && c.회신[d];
+    if (!v) return `<li>${e(d)}${d === c.주관과 ? "(주관)" : ""} <span class="hint">미회신</span></li>`;
+    const is = issues(c, d);
+    return `<li>${e(d)}${d === c.주관과 ? "(주관)" : ""} <span class="ok">회신</span> <small class="hint">${e(v.일시)} · ${e(v.파일명 || "엑셀 없음")}${v.메모 ? " · 메모: " + e(v.메모) : ""}</small>` +
+      (is.length ? `<div class="issues"><b>확인필요 ${is.length}건</b><ul>${is.map((x) => `<li>${x.행 ? x.행 + "행 · " : ""}<b>${e(x.항목)}</b> ${e(x.내용)}</li>`).join("")}</ul></div>` : "") + `</li>`;
+  }).join("");
+  const m = Validate.merge(c);
+  const nIssue = got.reduce((t, d) => t + issues(c, d).length, 0);
+  const 이력 = (c.보완이력 || []).map((h) => `<li>${e(h.일시)} · ${e(h.과.join(", "))} — ${e(h.사유)}</li>`).join("");
+  const canBo = ["회신중", "회신완료"].includes(c.상태);
+  const boForm = canBo ? `<details class="co"><summary>보완요청(그 과만 다시 회신)</summary>
+      <div class="row" style="margin-top:6px">${got.map((d) => `<label><input type="checkbox" class="boDept" value="${e(d)}" ${issues(c, d).length ? "checked" : ""}> ${e(d)}</label>`).join(" ")}</div>
+      <div class="row"><input type="text" class="boWhy" placeholder="보완 사유(필수)" style="flex:1;min-width:260px"><button class="bo">보완요청</button></div></details>` : "";
+  const okForm = c.상태 === "회신완료" ? `<div class="row" style="margin-top:10px">
+      <input type="text" class="cmt" placeholder="확정 코멘트(필수, 예: 확인필요 2건 사유 확인 · 제출본 반영)" style="flex:1;min-width:300px"><button class="primary done">확인 완료</button></div>` : "";
+  const fin = c.상태 === "확정" ? `<div class="mine"><b>확정</b> ${e(c.확정일시 || c.일시)} — ${e(c.확정코멘트)}</div>` : "";
+  return `<section class="case" data-id="${e(c.id)}">
+    <div class="row" style="justify-content:space-between">
+      <div><span class="badge st-${e(c.상태)}">${e(c.상태)}</span> <b>${e(c.id)}</b> <span class="hint">${e(c.위원회)} · 제출기한 ${e(c.제출기한)}</span></div>
+      <div class="hint">회신 ${got.length}/${all.length}${notYet.length ? ` · 미회신 ${e(notYet.join(", "))}` : ""} · 확인필요 ${nIssue}건</div>
+    </div>
+    <div>${e(c.요구내용)}</div>
+    ${c.상태 === "보완요청" && c.보완 ? `<div class="re" style="margin-top:6px"><b>보완요청 중</b> ${e(c.보완.과.join(", "))} — ${e(c.보완.사유)}${c.보완.남은과.length ? ` · 다시 회신 대기 ${e(c.보완.남은과.join(", "))}` : ""}</div>` : ""}
+    <ul class="cand" style="margin-top:6px">${per}</ul>
+    ${m.행.length ? table(m.머리글, m.행) : `<div class="hint">엑셀 회신이 없습니다.</div>`}
+    ${이력 ? `<div class="hint" style="margin-top:6px">보완 이력</div><ul class="hint">${이력}</ul>` : ""}
+    ${fin}${boForm}${okForm}
+  </section>`;
+}
+
+function drawCases() {
+  const f = $("fState").value;
+  const list = cur.cases.filter((c) => (f === "회신" ? REPLIED.includes(c.상태) : c.상태 === f));
+  $("count").textContent = `${list.length}문항`;
+  $("cases").innerHTML = list.length ? list.map(caseHtml).join("") : `<section><p class="hint">해당 문항이 없습니다. 현업 회신 화면에서 회신이 들어오면 여기에 모입니다.</p></section>`;
+}
+
+$("cases").onclick = async (ev) => {
+  const btn = ev.target.closest("button.bo, button.done"); if (!btn) return;
+  const card = btn.closest(".case"), id = card.dataset.id;
+  const req = btn.classList.contains("bo")
+    ? { 작업: "보완요청", id, 과: [...card.querySelectorAll(".boDept:checked")].map((x) => x.value), 사유: card.querySelector(".boWhy").value }
+    : { 작업: "확정", id, 코멘트: card.querySelector(".cmt").value };
+  btn.disabled = true;
+  try {
+    const { db } = await App.act(req);
+    cur = db;
+    msg(req.작업 === "보완요청" ? `${id} 보완요청 → ${req.과.join(", ")}에만 다시 회신을 받습니다.` : `${id} 확정했습니다. 제출본에 들어갑니다.`);
+    drawAll();
+  } catch (err) { msg(err.message, true); btn.disabled = false; }
+};
+
+$("ledger").onchange = async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  const rows = Engine.parseCSV(await f.text(), true);           // 공백을 지우지 않고 읽는다(표기 점검)
+  const out = Validate.checkLedger(rows, eng.org.map((o) => o.과));
+  const by = {}; for (const x of out) by[x.항목] = (by[x.항목] || 0) + 1;
+  $("ledgerOut").innerHTML = `<p><b>${e(f.name)}</b> ${rows.length}행 → <b class="${out.length ? "bad" : "ok"}">확인필요 ${out.length}건</b> (${new Set(out.map((x) => x.행)).size}행) · ` +
+    Object.entries(by).map(([k, v]) => `${e(k)} ${v}`).join(" · ") + `</p>` +
+    (out.length ? table(["행", "접수번호", "항목", "내용"], out.map((x) => [x.행, x.접수번호, x.항목, x.내용])) : "");
+};
+
+// ── 현황·제출본 ─────────────────────────────────────────
+function drawStat() {
+  const n = (s) => cur.cases.filter((c) => c.상태 === s).length;
+  $("cards").innerHTML = `<div class="card">전체 문항<b>${cur.cases.length}</b></div>` +
+    App.STATES.map((s) => `<div class="card"><span class="badge st-${s}">${s}</span><b>${n(s)}</b></div>`).join("");
+  const depts = eng.org.map((o) => o.과).filter((d) => cur.cases.some((c) => c.주관과 === d));
+  const states = App.STATES.filter((s) => s !== "접수");
+  const color = { 배분확정: "#1f9d57", 회신중: "#6d5bd0", 회신완료: "#0f8f83", 확정: "#2f6fe0", 재배정요청: "#c77d19", 보완요청: "#bf3423" };
+  const data = { labels: depts, datasets: states.map((s) => ({ label: s, backgroundColor: color[s], maxBarThickness: 28, data: depts.map((d) => cur.cases.filter((c) => c.주관과 === d && c.상태 === s).length) })) };
+  $("chart").parentElement.style.height = Math.max(160, depts.length * 34 + 90) + "px";   // 과 수만큼만 높게
+  if (chart) chart.destroy();
+  chart = new Chart($("chart"), { type: "bar", data, options: { indexAxis: "y", maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { precision: 0 } }, y: { stacked: true } }, plugins: { legend: { position: "bottom" } } } });
+  const fin = cur.cases.filter((c) => c.상태 === "확정");
+  $("subHint").textContent = `확정 ${fin.length}문항`;
+  $("xlsx").disabled = $("md").disabled = !fin.length;
+  $("subList").innerHTML = fin.length ? table(submitHead, fin.map(submitRow)) : `<p class="hint">확정한 문항이 없습니다.</p>`;
+}
+
+// 제출목록(처리지침 제6장 제2조: 배분과 · 회신 여부 · 제출일 · 기한 준수)
+const submitHead = ["문항", "위원회", "의원", "문항번호", "요구내용", "제출기한", "주관과", "협조과", "회신 과", "확인필요", "확정일시", "기한 준수", "확정 코멘트"];
+function submitRow(c) {
+  const all = Flow.담당과(c), got = all.filter((d) => c.회신 && c.회신[d]);
+  const nIssue = got.reduce((t, d) => t + issues(c, d).length, 0);
+  const day = String(c.확정일시 || c.일시).slice(0, 10);
+  return [c.id, c.위원회, c.의원, c.문항번호, c.요구내용, c.제출기한, c.주관과, c.협조과.join(", "), `${got.length}/${all.length}`, nIssue, c.확정일시 || c.일시, day <= c.제출기한 ? "O" : "X(기한 경과)", c.확정코멘트];
+}
+const today = () => Flow.now().slice(0, 10).replace(/-/g, "");
+
+$("xlsx").onclick = () => {
+  const fin = cur.cases.filter((c) => c.상태 === "확정");
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([submitHead, ...fin.map(submitRow)]), "제출목록");
+  for (const c of fin) {
+    const m = Validate.merge(c);
+    const aoa = [[`요구: ${c.id} ${c.위원회} — ${c.요구내용}`], m.머리글, ...m.행];
+    for (const x of m.메모만) aoa.push([x.과, `(메모) ${x.메모}`]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), c.id.slice(0, 31));
+  }
+  XLSX.writeFile(wb, `제출본_국회요구자료_${today()}.xlsx`);
+};
+
+$("md").onclick = () => {
+  const fin = cur.cases.filter((c) => c.상태 === "확정");
+  const cell = (v) => String(v ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  const mdTable = (h, rows) => [`| ${h.map(cell).join(" | ")} |`, `|${h.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.map(cell).join(" | ")} |`)].join("\n");
+  const parts = [`# 국회 요구자료 제출본`, ``, `만든 날: ${Flow.now()} · 확정 ${fin.length}문항 (과장 결재 전 초안)`, ``, `## 제출목록`, ``, mdTable(submitHead, fin.map(submitRow))];
+  for (const c of fin) {
+    const m = Validate.merge(c);
+    parts.push(``, `## ${c.id} ${c.요구내용}`, ``, `- 위원회: ${c.위원회} · 제출기한: ${c.제출기한} · 주관: ${c.주관과}${c.협조과.length ? " · 협조: " + c.협조과.join(", ") : ""}`, `- 확정 코멘트: ${c.확정코멘트}`, ``);
+    parts.push(m.행.length ? mdTable(m.머리글, m.행) : "(엑셀 회신 없음)");
+    for (const x of m.메모만) parts.push(``, `- ${x.과}: ${x.메모}`);
+  }
+  const blob = new Blob([parts.join("\n") + "\n"], { type: "text/markdown;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `제출본_국회요구자료_${today()}.md`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+// ── 공통 ───────────────────────────────────────────────
+function drawAll() { drawCases(); if (!$("tab-stat").hidden) drawStat(); }
+async function refresh() { try { cur = await App.load(); drawAll(); } catch (err) { msg(err.message, true); } }
+document.querySelector(".tabs").onclick = (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+  $("tab-check").hidden = b.dataset.tab !== "check"; $("tab-stat").hidden = b.dataset.tab !== "stat";
+  drawAll();
+};
+$("fState").onchange = drawCases;
+$("reload").onclick = refresh;
+(async () => {
+  try { eng = await App.loadEngine(); await refresh(); }
+  catch (err) { msg(err.message, true); }
+})();
+</script>
+</body>
+</html>

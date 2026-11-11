@@ -2,7 +2,7 @@
 // 근거: 00_문제정의/design.md 3절 상태표 · 4절 거부 규칙
 //   Flow.apply(db, 요청, 조직도과이름[]) → { ok: true, 상태, ... }  (db를 그 자리에서 바꾼다)
 //   규칙에 안 맞으면 FlowError(409 순서 · 400 값 · 403 권한)를 던지고 db는 그대로 둔다.
-// S7(AI 추천)·S8(보완요청·확정)은 이 파일의 ACTIONS에 작업을 더한다.
+// AI 추천(S7)은 기록을 바꾸지 않아 api/app.js가 따로 처리한다. 보완요청·확정은 S8에서 더했다.
 (function (root) {
   "use strict";
 
@@ -76,18 +76,24 @@
     },
 
     // 회신: 담당 과만. 모든 담당 과가 회신하면 회신완료, 아니면 회신중.
+    // 보완요청 상태에서는 보완을 요청받은 과만 다시 회신하고, 그 과들이 모두 다시 내면 회신완료.
     회신(db, req, org) {
       const c = findCase(db, req.id);
       needState(c, ["배분확정", "회신중", "보완요청"], "회신");
       needOrg(org, req.과, "회신하는 과");
       needOwner(c, req.과);
+      if (c.상태 === "보완요청" && !(c.보완 && c.보완.남은과.includes(req.과)))
+        fail(403, `${req.과}는 ${c.id} 문항의 보완요청 대상이 아닙니다(대상: ${(c.보완 && c.보완.과.join(", ")) || "없음"}).`);
       const 파일명 = text(req.파일명, 200), 메모 = text(req.메모, 1000);
       if (!파일명 && !메모) fail(400, "회신 엑셀을 올리거나 메모(예: 자료 없음)를 적으세요.");
       const 행 = Array.isArray(req.행) ? req.행.slice(0, 500).map((r) => (Array.isArray(r) ? r.slice(0, 50).map((v) => (v == null ? "" : typeof v === "number" ? v : text(v, 500))) : [])) : [];
       c.회신 = c.회신 || {};
-      c.회신[req.과] = { 파일명, 행, 메모, 확인필요: [], 일시: now() };
+      const 확인필요 = (Array.isArray(req.확인필요) ? req.확인필요 : []).slice(0, 50)
+        .map((x) => ({ 행: Number(x && x.행) || 0, 항목: text(x && x.항목, 30), 내용: text(x && x.내용, 300) }));
+      c.회신[req.과] = { 파일명, 행, 메모, 확인필요, 일시: now() };
+      if (c.상태 === "보완요청") c.보완.남은과 = c.보완.남은과.filter((d) => d !== req.과);
       const 남은과 = 담당과(c).filter((d) => !c.회신[d]);
-      c.상태 = 남은과.length ? "회신중" : "회신완료";
+      c.상태 = c.상태 === "보완요청" && c.보완.남은과.length ? "보완요청" : 남은과.length ? "회신중" : "회신완료";
       c.일시 = now();
       addLog(db, "회신", c.id, req.과);
       return { 남은과 };
@@ -106,6 +112,31 @@
       Object.assign(c, { 상태: "재배정요청", 재배정: { 과: req.과, 사유, 희망과, 일시: now() }, 일시: now() });
       addLog(db, "재배정요청", c.id, req.과, 사유);
     },
+  };
+
+  // 보완요청(S8): 총괄이 사유를 적어 그 과(들)에만 다시 회신을 요청한다. 이력은 지우지 않는다(제4장 제7조).
+  ACTIONS.보완요청 = (db, req, org) => {
+    const c = findCase(db, req.id);
+    needState(c, ["회신중", "회신완료"], "보완을 요청");
+    const 과 = [...new Set((Array.isArray(req.과) ? req.과 : [req.과]).map((d) => text(d, 50)).filter(Boolean))];
+    if (!과.length) fail(400, "보완을 요청할 과를 고르세요.");
+    for (const d of 과) { needOrg(org, d, "보완 요청 과"); if (!(c.회신 || {})[d]) fail(400, `${d}는 아직 회신하지 않아 보완을 요청할 수 없습니다.`); }
+    const 사유 = text(req.사유, 500);
+    if (!사유) fail(400, "보완 사유를 적으세요.");
+    c.보완 = { 과, 남은과: [...과], 사유, 일시: now() };
+    c.보완이력 = [...(c.보완이력 || []), { 과, 사유, 일시: now() }];
+    Object.assign(c, { 상태: "보완요청", 일시: now() });
+    addLog(db, "보완요청", c.id, 과.join(", "), 사유);
+  };
+
+  // 확정(S8): 회신완료 문항을 총괄이 확인하고 코멘트를 남긴다. 확정한 문항만 제출본에 들어간다.
+  ACTIONS.확정 = (db, req) => {
+    const c = findCase(db, req.id);
+    needState(c, ["회신완료"], "확정");
+    const 코멘트 = text(req.코멘트, 500);
+    if (!코멘트) fail(400, "확정 코멘트를 적으세요(예: 확인필요 2건 사유 확인).");
+    Object.assign(c, { 상태: "확정", 확정코멘트: 코멘트, 확정일시: now(), 일시: now() });
+    addLog(db, "확정", c.id, c.주관과, 코멘트);
   };
 
   function apply(db, req, org) {

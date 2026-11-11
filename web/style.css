@@ -127,3 +127,14 @@ section.case { padding: 14px 18px; }
 .cand.ai { border-left: 3px solid #8b5cf6; padding-left: 22px; margin-top: 4px; }
 button.aibtn { border-color: #8b5cf6; color: #5b2bb5; background: #f5f0ff; }
 button.aibtn:hover { border-color: #5b2bb5; }
+
+/* ── 확인필요(S8) ── */
+.issues { margin-top: 6px; padding: 8px 12px; border-radius: 10px; background: var(--bad-soft); color: #7a2214; font-size: 13px; }
+.issues ul { margin: 4px 0 0; padding-left: 18px; }
+.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.chartbox { position: relative; height: 420px; }
+
+/* 문항 id·날짜는 중간에서 줄을 바꾸지 않는다 */
+.nowrap { white-space: nowrap; }
+#subList td:nth-child(1), #subList td:nth-child(6), #subList td:nth-child(7), #subList td:nth-child(9), #subList td:nth-child(11), #subList td:nth-child(12) { white-space: nowrap; }
