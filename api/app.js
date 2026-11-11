@@ -16,7 +16,8 @@ function blobStore() {
     async read() {
       const r = await get(KEY, { access: "private", useCache: false });
       if (!r || r.statusCode !== 200) return { db: Flow.empty(), etag: null };
-      return { db: JSON.parse(await new Response(r.stream).text()), etag: r.blob.etag };
+      // get은 약한 etag(W/"…")를 주고, put의 ifMatch는 W/ 없는 값과 비교한다(11-11 실측).
+      return { db: JSON.parse(await new Response(r.stream).text()), etag: r.blob.etag.replace(/^W\//, "") };
     },
     async write(db, etag) {
       await put(KEY, JSON.stringify(db), {
