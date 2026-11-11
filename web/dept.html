@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>국회 요구자료 대응 — 현업 회신</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>국회 요구자료 대응</h1><nav id="nav"></nav></header>
+<main>
+  <div id="msg"></div>
+
+  <section>
+    <h2>현업 회신 — 내 과에 배분된 문항</h2>
+    <div class="row">
+      <label>내 과 <select id="myDept"><option value="">— 고르세요 —</option></select></label>
+      <label><input type="checkbox" id="showDone"> 회신을 마친 문항도 보기</label>
+      <button id="reload">새로 고침</button>
+      <span class="hint" id="count"></span>
+    </div>
+    <p class="hint">배분일부터 3일 안(의원실 기한이 더 빠르면 그 기한)에 회신 엑셀을 올립니다. 소관이 아니면 배분 후 2시간 안에 재배정을 요청하세요. 회신 엑셀은 1행이 요구 표시, 2행이 머리글입니다(처리지침 별표 3).</p>
+  </section>
+
+  <div id="cards"></div>
+</main>
+
+<script src="lib/xlsx.full.min.js"></script>
+<script src="engine.js"></script>
+<script src="flow.js"></script>
+<script src="common.js"></script>
+<script>
+"use strict";
+App.nav("dept.html");
+const $ = (id) => document.getElementById(id), e = App.esc;
+const PREF = "국회요구자료_내과";
+let eng = null, cur = { cases: [], log: [] };
+const files = {};   // 문항 id → {파일명, 행}  (올렸지만 아직 제출 안 한 엑셀)
+
+function msg(text, err) { $("msg").innerHTML = text ? `<div class="msg ${err ? "err" : ""}">${e(text)}</div>` : ""; window.scrollTo(0, 0); }
+const OPEN = ["배분확정", "회신중", "보완요청"];   // 회신·재배정 요청을 할 수 있는 상태
+
+function orgOptions(sel, blank) {
+  const byDiv = new Map();
+  for (const o of eng.org) (byDiv.get(o.실국) || byDiv.set(o.실국, []).get(o.실국)).push(o.과);
+  return `<option value="">${blank}</option>` + [...byDiv].map(([div, ds]) =>
+    `<optgroup label="${e(div)}">` + ds.map((d) => `<option ${d === sel ? "selected" : ""}>${e(d)}</option>`).join("") + `</optgroup>`).join("");
+}
+function rowsTable(rows) {
+  if (!rows || !rows.length) return "";
+  const show = rows.slice(0, 8);
+  return `<div class="scroll" style="max-height:220px;margin-top:6px"><table><tbody>` +
+    show.map((r, i) => `<tr>${r.map((v) => (i === 1 ? `<th>${e(v)}</th>` : `<td>${e(v)}</td>`)).join("")}</tr>`).join("") +
+    `</tbody></table></div>` + (rows.length > show.length ? `<div class="hint">… 모두 ${rows.length}행</div>` : "");
+}
+
+function draw() {
+  const me = $("myDept").value;
+  if (!me) { $("cards").innerHTML = `<section><p class="hint">위에서 내 과를 고르면 그 과에 배분된 문항만 보입니다.</p></section>`; $("count").textContent = ""; return; }
+  const mine = cur.cases.filter((c) => c.상태 !== "접수" && Flow.담당과(c).includes(me));
+  const todo = mine.filter((c) => OPEN.includes(c.상태) && !(c.회신 && c.회신[me] && c.상태 !== "보완요청"));
+  const list = $("showDone").checked ? mine : todo;
+  $("count").textContent = `회신할 문항 ${todo.length} · 내 과 담당 전체 ${mine.length}`;
+  if (!list.length) { $("cards").innerHTML = `<section><p class="hint">${e(me)}에 회신할 문항이 없습니다.</p></section>`; return; }
+
+  $("cards").innerHTML = list.map((c) => {
+    const role = c.주관과 === me ? "주관" : "협조";
+    const others = Flow.담당과(c).map((d) => `${e(d)}${d === c.주관과 ? "(주관)" : ""} ${c.회신 && c.회신[d] ? '<span class="ok">회신</span>' : '<span class="hint">미회신</span>'}`).join(" · ");
+    const my = c.회신 && c.회신[me];
+    const myHtml = my ? `<div class="mine"><b>내 회신</b> ${e(my.일시)} · ${e(my.파일명 || "엑셀 없음")}${my.메모 ? ` · 메모: ${e(my.메모)}` : ""}${rowsTable(my.행)}</div>` : "";
+    const can = OPEN.includes(c.상태);
+    const pend = files[c.id];
+    const form = can ? `
+      <div class="row" style="margin-top:10px">
+        <label>회신 엑셀 <input type="file" class="xl" accept=".xlsx,.xls"></label>
+        <input type="text" class="memo" placeholder="메모(예: 해당 자료 없음)" style="flex:1;min-width:220px">
+        <button class="primary send">${my ? "회신 다시 제출" : "회신 제출"}</button>
+      </div>
+      <div class="pend">${pend ? `<div class="hint">올린 파일: ${e(pend.파일명)} (${pend.행.length}행) — 아직 제출 전입니다.</div>${rowsTable(pend.행)}` : ""}</div>
+      <details class="co"><summary>소관이 아니면: 재배정 요청</summary>
+        <div class="row" style="margin-top:6px">
+          <input type="text" class="why" placeholder="사유(필수)" style="flex:1;min-width:220px">
+          <label>희망 과 <select class="want">${orgOptions("", "(모름)")}</select></label>
+          <button class="ask">재배정 요청</button>
+        </div>
+      </details>` : `<div class="hint" style="margin-top:6px">「${e(c.상태)}」 상태라 지금은 회신할 수 없습니다.</div>`;
+    return `<section class="case" data-id="${e(c.id)}">
+      <div class="row" style="justify-content:space-between">
+        <div><span class="badge st-${e(c.상태)}">${e(c.상태)}</span> <b>${e(c.id)}</b> <span class="hint">${e(c.위원회)} · 제출기한 ${e(c.제출기한)} · 내 역할 ${role}</span></div>
+        <div class="hint">${others}</div>
+      </div>
+      <div>${e(c.요구내용)}</div>
+      ${[c.세부항목, c.비고].filter(Boolean).map((x) => `<div class="hint">${e(x)}</div>`).join("")}
+      <div style="margin-top:6px">${App.historyHtml(App.history(eng.classify(c.요구내용)))}</div>
+      ${myHtml}${form}
+    </section>`;
+  }).join("");
+}
+
+async function refresh() {
+  try { cur = await App.load(); draw(); }
+  catch (err) { msg(err.message, true); }
+}
+
+$("cards").onchange = async (ev) => {
+  if (!ev.target.classList.contains("xl")) return;
+  const card = ev.target.closest(".case"), id = card.dataset.id, f = ev.target.files[0];
+  if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const 행 = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", blankrows: false });
+    files[id] = { 파일명: f.name, 행 };
+    card.querySelector(".pend").innerHTML = `<div class="hint">올린 파일: ${e(f.name)} (${행.length}행) — 아직 제출 전입니다.</div>${rowsTable(행)}`;
+  } catch (err) { msg(`엑셀을 읽지 못했습니다: ${err.message}`, true); }
+};
+
+$("cards").onclick = async (ev) => {
+  const btn = ev.target.closest("button.send, button.ask"); if (!btn) return;
+  const card = btn.closest(".case"), id = card.dataset.id, me = $("myDept").value;
+  const req = btn.classList.contains("send")
+    ? { 작업: "회신", id, 과: me, 파일명: files[id]?.파일명 || "", 행: files[id]?.행 || [], 메모: card.querySelector(".memo").value }
+    : { 작업: "재배정요청", id, 과: me, 사유: card.querySelector(".why").value, 희망과: card.querySelector(".want").value };
+  btn.disabled = true;
+  try {
+    const { result, db } = await App.act(req);
+    cur = db; delete files[id];
+    msg(req.작업 === "회신"
+      ? `${id} 회신 제출 → ${result.상태}` + (result.남은과 && result.남은과.length ? ` (남은 과: ${result.남은과.join(", ")})` : "")
+      : `${id} 재배정 요청을 보냈습니다. 총괄 담당이 다시 배분합니다.`);
+    draw();
+  } catch (err) { msg(err.message, true); btn.disabled = false; }
+};
+
+$("myDept").onchange = () => { try { localStorage.setItem(PREF, $("myDept").value); } catch (_) {} draw(); };
+$("showDone").onchange = draw;
+$("reload").onclick = refresh;
+
+(async () => {
+  try {
+    [eng] = await Promise.all([App.loadEngine(), App.loadLedger()]);
+    let saved = ""; try { saved = new URLSearchParams(location.search).get("과") || localStorage.getItem(PREF) || ""; } catch (_) {}
+    $("myDept").innerHTML = orgOptions(saved, "— 고르세요 —");
+    await refresh();
+  } catch (err) { msg(err.message, true); }
+})();
+</script>
+</body>
+</html>

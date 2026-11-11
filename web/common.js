@@ -1,17 +1,20 @@
-// common.js — 세 화면(배분·현업 회신·취합)과 시작 화면이 함께 쓰는 것: 이동 단추, 자료 읽기, 저장.
-// 저장은 지금(S5)은 브라우저 localStorage에만 한다. S6에서 서버(/api/app, cases.json)로 옮긴다.
+// common.js — 세 화면(배분·현업 회신·취합)과 시작 화면이 함께 쓰는 것: 이동 단추, 자료 읽기, 기록 읽기·저장, 과거 이력.
+// 기록 저장(S6): 주소가 *.vercel.app이면 서버(/api/app → Vercel Blob cases.json)에, 아니면 이 브라우저(localStorage)에.
+// 두 경우 모두 상태 규칙은 flow.js 하나로 검사한다(서버도 같은 파일).
 (function (root) {
   "use strict";
 
   const KEY = "국회요구자료_cases_v1";
-  const STATES = ["접수", "배분확정", "회신중", "회신완료", "확정", "재배정요청", "보완요청"];
-  const FILES = { rules: "data/rules_보강.csv", org: "data/A부_조직도_26개과.csv" };
+  const STATES = Flow.STATES;
+  const FILES = { rules: "data/rules_보강.csv", org: "data/A부_조직도_26개과.csv", ledger: "data/접수대장.csv" };
+  const SERVER = location.hostname.endsWith(".vercel.app");
+  const API = "/api/app";
 
-  // ── 이동 단추 ────────────────────────────────────────────
+  // ── 이동 단추 + 기록 위치 표시 ─────────────────────────────
   const PAGES = [
     ["index.html", "시작 화면"],
     ["assign.html", "배분"],
-    ["dept.html", "현업 회신", "S6"],
+    ["dept.html", "현업 회신"],
     ["collect.html", "취합", "S8"],
   ];
   function nav(active) {
@@ -20,6 +23,11 @@
     el.innerHTML = PAGES.map(([href, name, later]) =>
       later ? `<span class="nav-off" title="${later}에서 만듭니다">${name} <small>(${later})</small></span>`
             : `<a href="${href}" class="${href === active ? "on" : ""}">${name}</a>`).join("");
+    const mode = document.createElement("span");
+    mode.className = "mode " + (SERVER ? "mode-server" : "mode-local");
+    mode.textContent = SERVER ? "기록: 서버 공유(Vercel Blob)" : "기록: 이 브라우저에만";
+    mode.title = SERVER ? "모든 담당자가 같은 처리 단계를 봅니다." : "다른 사람·다른 브라우저에서는 보이지 않습니다. *.vercel.app 주소에서 열면 서버에 저장합니다.";
+    el.after(mode);
   }
 
   // ── 자료 읽기(web/data/의 CSV) ───────────────────────────
@@ -28,57 +36,71 @@
     if (!r.ok) throw new Error(`${path}를 읽지 못했습니다(${r.status}). 더블클릭으로 열었다면 python -m http.server로 여세요.`);
     return r.text();
   }
+  let orgNames = null;
   async function loadEngine() {
     const [rules, org] = await Promise.all([fetchText(FILES.rules), fetchText(FILES.org)]);
     const eng = Engine.create(rules, org);
     eng.org = Engine.parseCSV(org);            // [{실국, 과, ...}] 26개
+    orgNames = eng.org.map((o) => o.과);
     return eng;
   }
 
-  // ── 저장(localStorage) ──────────────────────────────────
-  function load() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || { cases: [], log: [] }; }
-    catch (e) { return { cases: [], log: [] }; }
+  // ── 기록 읽기·저장 ───────────────────────────────────────
+  async function load() {
+    if (SERVER) {
+      const r = await fetch(API, { cache: "no-store" });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || `기록을 읽지 못했습니다(${r.status}).`);
+      return body;
+    }
+    try { return JSON.parse(localStorage.getItem(KEY)) || Flow.empty(); }
+    catch (e) { return Flow.empty(); }
   }
-  function save(db) { localStorage.setItem(KEY, JSON.stringify(db)); }
+  // 작업 하나를 보내고 {결과, db}를 받는다. 거절이면 서버·flow.js의 문구로 오류를 던진다.
+  async function act(req) {
+    if (SERVER) {
+      const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || `저장하지 못했습니다(${r.status}).`);
+      const { db, ...result } = body;
+      return { result, db };
+    }
+    if (!orgNames) throw new Error("조직도를 아직 읽지 못했습니다.");
+    const db = await load();
+    const result = Flow.apply(db, req, orgNames);       // 거절이면 여기서 멈추고 저장하지 않음
+    localStorage.setItem(KEY, JSON.stringify(db));
+    return { result, db };
+  }
   function clearAll() { localStorage.removeItem(KEY); }
 
-  const now = () => new Date().toLocaleString("sv-SE").slice(0, 16);   // 2026-11-10 13:50
-  const caseId = (r) => `${r.의원}-${String(r.문항번호).padStart(2, "0")}`;
-  function addLog(db, 작업, id, 과) { db.log.push({ 일시: now(), 작업, 문항: id, 과: 과 || "" }); }
-
-  // 접수: 분해된 문항을 등록한다. 같은 id(의원-문항번호)는 다시 넣지 않는다.
-  function register(db, rows) {
-    const have = new Set(db.cases.map((c) => c.id));
-    let added = 0, dup = 0;
-    for (const r of rows) {
-      const id = caseId(r);
-      if (have.has(id)) { dup++; continue; }
-      db.cases.push({
-        id, 파일명: r.파일명, 위원회: r.위원회, 의원: r.의원, 제출기한: r.제출기한,
-        문항번호: Number(r.문항번호), 요구내용: r.요구내용, 세부항목: r.세부항목 || "", 비고: r.비고 || "",
-        상태: "접수", 주관과: "", 협조과: [], 확정방법: "", 후보: [], 일시: now(),
-      });
-      have.add(id); added++;
-      addLog(db, "접수", id);
-    }
-    return { added, dup };
+  // ── 과거 이력(접수대장 520건, 읽기만) ─────────────────────
+  // 1순위 후보의 근거 키워드가 든 과거 요구를 찾아 「n건 · 주로 ○○과」와 최근 5건을 낸다.
+  let ledger = null;
+  async function loadLedger() {
+    ledger = ledger || Engine.parseCSV(await fetchText(FILES.ledger));
+    return ledger;
+  }
+  function history(cand) {
+    if (!ledger || !cand || !cand.length) return null;
+    const kws = cand[0].근거키워드;
+    const hits = ledger.filter((l) => kws.some((k) => l.요구내용.includes(k)));
+    if (!hits.length) return null;
+    const cnt = new Map();
+    for (const h of hits) cnt.set(h.배분과, (cnt.get(h.배분과) || 0) + 1);
+    const [주로, 주로건수] = [...cnt].sort((a, b) => b[1] - a[1])[0];
+    const 최근 = [...hits].sort((a, b) => b.접수일.localeCompare(a.접수일)).slice(0, 5);
+    return { n: hits.length, 주로, 주로건수, 최근, kws };
+  }
+  function historyHtml(h) {
+    if (!h) return `<span class="hint">과거 이력 없음</span>`;
+    return `<details class="hist"><summary>과거 ${h.n}건 · 주로 ${esc(h.주로)}(${h.주로건수})</summary>
+      <div class="hint">키워드: ${esc(h.kws.join(", "))}</div><ol>` +
+      h.최근.map((l) => `<li><small>${esc(l.접수일)} · ${esc(l.위원회)}</small><br>${esc(l.요구내용)} → <b>${esc(l.배분과)}</b> <small>(${esc(l.처리상태)})</small></li>`).join("") +
+      `</ol></details>`;
   }
 
-  // 배분: 설계서 3절 상태표 — 접수·재배정요청·배분확정에서만 배분할 수 있다.
-  function assign(db, id, { 주관과, 협조과, 확정방법, 후보 }, orgNames) {
-    const c = db.cases.find((x) => x.id === id);
-    if (!c) throw new Error(`${id} 문항이 없습니다.`);
-    if (!["접수", "재배정요청", "배분확정"].includes(c.상태)) throw new Error(`「${c.상태}」 상태에서는 배분할 수 없습니다.`);
-    if (!주관과) throw new Error("주관 과를 고르세요.");
-    const bad = [주관과, ...협조과].filter((d) => !orgNames.includes(d));
-    if (bad.length) throw new Error(`조직도에 없는 과: ${bad.join(", ")}`);
-    Object.assign(c, { 상태: "배분확정", 주관과, 협조과: 협조과.filter((d) => d !== 주관과), 확정방법, 후보, 일시: now() });
-    addLog(db, "배분", id, 주관과);
-    return c;
-  }
-
+  const caseId = Flow.caseId;
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 
-  root.App = { STATES, FILES, nav, fetchText, loadEngine, load, save, clearAll, now, caseId, register, assign, esc };
+  root.App = { STATES, FILES, SERVER, nav, fetchText, loadEngine, load, act, clearAll, caseId, esc, loadLedger, history, historyHtml };
 })(self);

@@ -88,6 +88,9 @@ tbody tr:hover td { background: rgba(47,111,224,.04); }
 .st-접수 { background: #e3ecfd; color: #1f4fb0; }
 .st-배분확정 { background: var(--ok-soft); color: #13703d; }
 .st-재배정요청, .st-보완요청 { background: #fdf0dc; color: #8a5200; }
+.st-회신중 { background: #e9e6fb; color: #4b3aa8; }
+.st-회신완료 { background: #dff3f1; color: #0f6b62; }
+.st-확정 { background: #1f9d57; color: #fff; }
 .ok { color: var(--ok); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; } .warn { color: var(--warn); font-weight: 700; }
 
 /* ── 후보·협조 과 ── */
@@ -104,3 +107,16 @@ details.co label { font-size: 13px; }
 /* ── 알림 ── */
 .msg { padding: 9px 14px; border-radius: 12px; margin-bottom: 14px; background: var(--g1); border: 1px solid var(--g-edge); box-shadow: 0 0 0 1px var(--g-ring); backdrop-filter: var(--g-bf); -webkit-backdrop-filter: var(--g-bf); }
 .msg.err { background: var(--bad-soft); color: var(--bad); box-shadow: 0 0 0 1px rgba(191,52,35,.25); }
+
+/* ── 기록 위치 표시(S6) ── */
+.mode { margin-left: auto; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.mode-server { background: var(--ok-soft); color: #13703d; box-shadow: 0 0 0 1px rgba(31,157,87,.3); }
+.mode-local { background: #fdf0dc; color: #8a5200; box-shadow: 0 0 0 1px rgba(199,125,25,.35); }
+
+/* ── 재배정 요청 · 내 회신 · 과거 이력(S6) ── */
+.re { margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: #fdf0dc; color: #6b4000; font-size: 12px; line-height: 1.5; }
+.mine { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--ok-soft); }
+details.hist summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+details.hist ol { margin: 4px 0 0; padding-left: 18px; font-size: 12px; max-width: 360px; }
+details.hist li { margin: 3px 0; }
+section.case { padding: 14px 18px; }
