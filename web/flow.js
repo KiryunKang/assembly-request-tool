@@ -72,7 +72,7 @@
       const keep = new Set([req.주관과, ...협조과]);
       const 회신 = Object.fromEntries(Object.entries(c.회신 || {}).filter(([d]) => keep.has(d)));
       Object.assign(c, { 상태: "배분확정", 주관과: req.주관과, 협조과, 확정방법: req.확정방법, 후보, 회신, 일시: now() });
-      addLog(db, "배분", c.id, c.주관과);
+      addLog(db, "배분", c.id, c.주관과, "확정방법 " + req.확정방법);
     },
 
     // 회신: 담당 과만. 모든 담당 과가 회신하면 회신완료, 아니면 회신중.

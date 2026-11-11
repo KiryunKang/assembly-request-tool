@@ -30,7 +30,7 @@
       <button id="reload">새로 고침</button>
       <span class="hint" id="count"></span>
     </div>
-    <p class="hint">후보는 배분기준표(보강본) 규칙으로 계산하며 근거 키워드를 함께 보여 줍니다. 과거 이력은 1순위 근거 키워드가 든 과거 요구(접수대장 520건)입니다. 주관 과는 1순위 후보(재배정요청이면 희망 과)가 기본값이고, 1순위 후보와 다르게 고르면 확정방법이 「수정」으로 기록됩니다.</p>
+    <p class="hint">후보는 배분기준표(보강본) 규칙으로 계산하며 근거 키워드를 함께 보여 줍니다. 과거 이력은 1순위 근거 키워드가 든 과거 요구(접수대장 520건)입니다. 규칙 후보가 없는 문항만 [AI 추천]을 쓸 수 있고(요구내용만 보냄), AI 후보는 보라색으로 보입니다. 주관 과는 1순위 후보(재배정요청이면 희망 과)가 기본값이며, 그대로 확정하면 확정방법이 「규칙」 또는 「AI」, 다른 과로 바꾸면 「수정」으로 기록됩니다.</p>
     <div class="scroll" style="max-height:none">
       <table>
         <thead><tr><th>상태</th><th>의원·문항</th><th>요구내용</th><th>후보 3순위</th><th>과거 이력</th><th>주관 과 · 협조 과</th><th>확정</th></tr></thead>
@@ -51,6 +51,7 @@ App.nav("assign.html");
 pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
 const $ = (id) => document.getElementById(id), e = App.esc;
 let eng = null, pending = [], cur = { cases: [], log: [] };
+const aiCand = {};   // 문항 id → {후보:[{과, 근거}], 해당없음}  (AI 추천 결과, 확정 전까지 화면에만)
 
 function msg(text, err) { $("msg").innerHTML = text ? `<div class="msg ${err ? "err" : ""}">${e(text)}</div>` : ""; }
 
@@ -132,15 +133,33 @@ function drawAssign() {
   $("count").textContent = `${list.length}문항 표시 · 전체 ${db.cases.length} · 배분확정 ${n("배분확정")} · 재배정요청 ${n("재배정요청")}`;
   if (!db.cases.length) { $("rows").innerHTML = `<tr><td colspan="7" class="hint">접수한 문항이 없습니다. 위 ① 접수에서 요구서를 올리세요.</td></tr>`; return; }
 
-  $("rows").innerHTML = list.map((c) => {
+  $("rows").innerHTML = list.map(rowHtml).join("");
+}
+
+// 규칙 후보가 없으면: AI 결과 → 확정 때 저장한 AI 후보 → [AI 추천] 단추 순으로 보여 준다.
+function aiHtml(c) {
+  const a = aiCand[c.id];
+  if (a) return a.해당없음
+    ? `<span class="badge ai-tag">AI 추천</span><div class="warn">AI도 맞는 과를 찾지 못했습니다</div><div class="hint">직접 고르세요</div>`
+    : `<span class="badge ai-tag">AI 추천</span><ol class="cand ai">${a.후보.map((x) => `<li>${e(x.과)} <small>근거: ${e(x.근거)}</small></li>`).join("")}</ol>`;
+  const saved = ["AI", "수정"].includes(c.확정방법) && c.후보.length
+    ? `<div class="hint">확정 때 AI 후보: <span class="ai-txt">${e(c.후보.join(", "))}</span></div>` : "";
+  const btn = App.SERVER
+    ? `<button class="aibtn">AI 추천</button>`
+    : `<div class="hint">AI 추천은 서버 주소(*.vercel.app)에서만 됩니다</div>`;
+  return `<span class="warn">규칙 후보 없음</span>${saved}<div style="margin-top:4px">${btn}</div>`;
+}
+
+function rowHtml(c) {
     const cand = eng.classify(c.요구내용);
     const re = c.상태 === "재배정요청" && c.재배정 ? c.재배정 : null;
-    const sel = (re && re.희망과) || c.주관과 || (cand[0] ? cand[0].과 : "");
+    const ai = aiCand[c.id] && aiCand[c.id].후보[0] ? aiCand[c.id].후보[0].과 : "";
+    const sel = (re && re.희망과) || ai || c.주관과 || (cand[0] ? cand[0].과 : "");
     const canAssign = ["접수", "재배정요청", "배분확정"].includes(c.상태);
     const sub = [c.세부항목, c.비고].filter(Boolean).map((x) => `<div class="hint">${e(x)}</div>`).join("");
     const candHtml = cand.length
       ? `<ol class="cand">${cand.map((x) => `<li>${e(x.과)} <small>근거: ${e(x.근거키워드.join(", "))}</small></li>`).join("")}</ol>`
-      : `<span class="warn">규칙 후보 없음</span><div class="hint">직접 고르세요(AI 추천은 S7)</div>`;
+      : aiHtml(c);
     const reHtml = re ? `<div class="re"><b>${e(re.과)}</b> 재배정 요청<br>사유: ${e(re.사유)}<br>희망 과: ${e(re.희망과 || "(없음)")}<br><small>${e(re.일시)}</small></div>` : "";
     const done = c.확정방법 ? `<div class="hint">${e(c.확정방법)} · ${e(c.일시)}</div>` : "";
     return `<tr data-id="${e(c.id)}">
@@ -153,7 +172,6 @@ function drawAssign() {
           <details class="co"><summary>협조 과 ${c.협조과.length ? `(${c.협조과.length}) ` + e(c.협조과.join(", ")) : "선택"}</summary><div class="boxes">${coBoxes(c.id, c.협조과)}</div></details></td>
       <td><button class="primary go" ${canAssign ? "" : "disabled"}>${c.상태 === "접수" ? "확정" : "다시 확정"}</button>${done}</td>
     </tr>`;
-  }).join("");
 }
 
 async function refresh() {
@@ -161,21 +179,44 @@ async function refresh() {
   catch (err) { msg(err.message, true); }
 }
 
+// 확정방법: 규칙 1순위 그대로 → 규칙 · AI 1순위 그대로 → AI · 그 밖(다른 과로 바꿈·직접 고름) → 수정
+function method(rule, ai, 주관과) {
+  if (rule.length) return 주관과 === rule[0] ? "규칙" : "수정";
+  if (ai.length) return 주관과 === ai[0] ? "AI" : "수정";
+  return "수정";
+}
+
 $("rows").onclick = async (ev) => {
+  const aiBtn = ev.target.closest("button.aibtn");
+  if (aiBtn) return askAI(aiBtn);
   const btn = ev.target.closest("button.go"); if (!btn) return;
   const tr = btn.closest("tr"), id = tr.dataset.id;
   const c = cur.cases.find((x) => x.id === id);
-  const 후보 = eng.classify(c.요구내용).map((x) => x.과);
+  const rule = eng.classify(c.요구내용).map((x) => x.과);
+  const ai = aiCand[id] ? aiCand[id].후보.map((x) => x.과) : [];
   const 주관과 = tr.querySelector("select.main").value;
   const 협조과 = [...tr.querySelectorAll(`input[name="co-${CSS.escape(id)}"]:checked`)].map((x) => x.value).filter((d) => d !== 주관과);
+  const 확정방법 = method(rule, ai, 주관과);
   btn.disabled = true;
   try {
-    const { db } = await App.act({ 작업: "배분", id, 주관과, 협조과, 확정방법: 후보[0] && 주관과 === 후보[0] ? "규칙" : "수정", 후보 });
-    cur = db;
-    msg(`${id} 배분확정 — 주관 ${주관과}` + (협조과.length ? ` · 협조 ${협조과.join(", ")}` : ""));
+    const { db } = await App.act({ 작업: "배분", id, 주관과, 협조과, 확정방법, 후보: rule.length ? rule : ai });
+    cur = db; delete aiCand[id];
+    msg(`${id} 배분확정 — 주관 ${주관과}` + (협조과.length ? ` · 협조 ${협조과.join(", ")}` : "") + ` · 확정방법 ${확정방법}`);
     drawAssign();
   } catch (err) { msg(err.message, true); btn.disabled = false; }
 };
+// AI 추천: 요구내용만 서버로 보낸다. 결과는 확정 전까지 그 행에만 보이고, 자동 확정하지 않는다.
+async function askAI(btn) {
+  const tr = btn.closest("tr"), id = tr.dataset.id;
+  const c = cur.cases.find((x) => x.id === id);
+  btn.disabled = true; btn.textContent = "AI에 묻는 중…";
+  try {
+    const { result } = await App.act({ 작업: "AI추천", 요구내용: c.요구내용 });
+    aiCand[id] = { 후보: result.후보 || [], 해당없음: !!result.해당없음 };
+    tr.outerHTML = rowHtml(c);
+    msg(`${id} AI 추천: ` + (aiCand[id].해당없음 ? "맞는 과 없음" : aiCand[id].후보.map((x) => x.과).join(", ")) + " — 확인 후 확정하세요.");
+  } catch (err) { msg(err.message, true); btn.disabled = false; btn.textContent = "AI 추천"; }
+}
 $("fState").onchange = drawAssign;
 $("fMember").onchange = drawAssign;
 $("reload").onclick = refresh;

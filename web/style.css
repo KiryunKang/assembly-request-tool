@@ -120,3 +120,10 @@ details.hist summary { cursor: pointer; color: var(--accent); font-size: 13px; }
 details.hist ol { margin: 4px 0 0; padding-left: 18px; font-size: 12px; max-width: 360px; }
 details.hist li { margin: 3px 0; }
 section.case { padding: 14px 18px; }
+
+/* ── AI 추천(S7): 규칙 후보와 색으로 구분 ── */
+.ai-tag { background: #efe7fd; color: #5b2bb5; }
+.cand.ai li, .ai-txt { color: #5b2bb5; }
+.cand.ai { border-left: 3px solid #8b5cf6; padding-left: 22px; margin-top: 4px; }
+button.aibtn { border-color: #8b5cf6; color: #5b2bb5; background: #f5f0ff; }
+button.aibtn:hover { border-color: #5b2bb5; }

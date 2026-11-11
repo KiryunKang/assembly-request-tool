@@ -97,6 +97,40 @@ async function expectReject(name, body, status) {
   const db = JSON.parse(store.text);
   check("동시 저장 → 다시 처리해 둘 다 남음", r.status === 200 && db.log.some((l) => l.작업 === "다른 사람") && db.cases.find((c) => c.id === "의원K-03").상태 === "배분확정");
 
+  // ── AI 추천(S7): 가짜 OpenAI 응답으로 시험 ─────────────
+  const sent = [];
+  const fakeAI = (content, status = 200) => async (url, opt) => {
+    sent.push(JSON.parse(opt.body));
+    return { ok: status === 200, status, json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
+  };
+  async function ai(fetchFn, env, body) {
+    const h = app.make(store, { fetch: fetchFn, env });
+    const req = { method: "POST", body };
+    const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, end(t) { this.text = t; } };
+    const before = store.text;
+    await h(req, res);
+    return { status: res.statusCode, body: JSON.parse(res.text), same: store.text === before };
+  }
+  const KEY = { OPENAI_API_KEY: "test-key" };
+  r = await ai(fakeAI({ 후보: [{ 과: "운영지원과", 근거: "청사·복무 지원 업무" }, { 과: "미래전략과", 근거: "없는 과" }, { 과: "운영지원과", 근거: "중복" }], 해당없음: false }),
+    KEY, { 작업: "AI추천", 요구내용: "직원 식당 위탁 운영 업체 선정 내역(최근 3년)" });
+  check("AI추천 ① 목록 밖 과(미래전략과)·중복 제거", r.status === 200 && r.body.후보.length === 1 && r.body.후보[0].과 === "운영지원과" && r.body.제거.join() === "미래전략과" && r.same,
+    `${r.status} ${JSON.stringify(r.body)} · cases.json ${r.same ? "그대로" : "바뀜"}`);
+  const s0 = sent[0];
+  check("AI추천 요청 형식(gpt-4o-mini · temperature 0 · JSON · 요구내용만 보냄)",
+    s0.model === "gpt-4o-mini" && s0.temperature === 0 && s0.response_format.type === "json_object" && s0.messages[1].content === "요구내용: 직원 식당 위탁 운영 업체 선정 내역(최근 3년)" && s0.messages[0].content.includes("교육훈련과"));
+  r = await ai(fakeAI({ 후보: [], 해당없음: true }), KEY, { 작업: "AI추천", 요구내용: "타 부처 소관 사업의 연도별 집행 내역" });
+  check("AI추천 ② 해당없음", r.status === 200 && r.body.해당없음 === true && r.body.후보.length === 0, JSON.stringify(r.body));
+  r = await ai(fakeAI({}), {}, { 작업: "AI추천", 요구내용: "장관 주재 회의 개최 일정" });
+  check("AI추천 ③ 키 없음 → 500과 안내 문구", r.status === 500 && r.body.error.includes("OPENAI_API_KEY") && sent.length === 2, r.body.error);
+  r = await ai(async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "JSON 아님" } }] }) }), KEY, { 작업: "AI추천", 요구내용: "x" });
+  check("AI추천 ④ AI 응답이 JSON이 아님 → 502", r.status === 502, r.body.error);
+
+  // GATE: AI 후보 → 담당자 수정 → 처리 기록에 확정방법 「수정」
+  r = await call("POST", { 작업: "배분", id: "의원C-19", 주관과: "혁신행정담당관", 협조과: [], 확정방법: "수정", 후보: ["운영지원과"] });
+  const lastLog = JSON.parse(store.text).log.slice(-1)[0];
+  check("AI 후보를 수정해 확정 → 처리 기록에 확정방법 수정", r.status === 200 && lastLog.작업 === "배분" && lastLog.비고 === "확정방법 수정", JSON.stringify(lastLog));
+
   r = await call("GET");
   const st = {}; for (const c of r.body.cases) st[c.상태] = (st[c.상태] || 0) + 1;
   check("마지막 조회", r.status === 200 && r.body.cases.length === 78, JSON.stringify(st) + ` · 기록 ${r.body.log.length}줄`);
