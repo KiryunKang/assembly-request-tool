@@ -11,7 +11,7 @@ const KEY = "cases.json";
 
 // Vercel Blob 저장소. 읽을 때 etag를 받아 두고, 쓸 때 그 사이 다른 사람이 바꿨으면 실패시킨다.
 function blobStore() {
-  const { get, put } = require("@vercel/blob");
+  const { get, put, BlobPreconditionFailedError } = require("@vercel/blob");
   return {
     async read() {
       const r = await get(KEY, { access: "private", useCache: false });
@@ -20,15 +20,22 @@ function blobStore() {
       return { db: JSON.parse(await new Response(r.stream).text()), etag: r.blob.etag.replace(/^W\//, "") };
     },
     async write(db, etag) {
-      await put(KEY, JSON.stringify(db), {
-        access: "private", contentType: "application/json; charset=utf-8",
-        addRandomSuffix: false, allowOverwrite: true, ...(etag ? { ifMatch: etag } : {}),
-      });
+      try {
+        await put(KEY, JSON.stringify(db), {
+          access: "private", contentType: "application/json; charset=utf-8",
+          addRandomSuffix: false, allowOverwrite: true, ...(etag ? { ifMatch: etag } : {}),
+        });
+      } catch (e) {
+        // 오류 클래스에 이름이 없어(e.name이 "Error") instanceof로 가린다(11-11 실측).
+        if (e instanceof BlobPreconditionFailedError) e.conflict = true;
+        throw e;
+      }
     },
   };
 }
 
-const isConflict = (e) => e && (e.name === "BlobPreconditionFailedError" || e.conflict === true);
+const isConflict = (e) => e && e.conflict === true;
+const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 function send(res, status, body) {
   res.statusCode = status;
@@ -51,15 +58,16 @@ function make(store) {
       if (req.method !== "POST") return send(res, 405, { error: "GET 또는 POST만 받습니다." });
       let body;
       try { body = await readBody(req); } catch { return send(res, 400, { error: "요청이 JSON 형식이 아닙니다." }); }
-      // 두 사람이 거의 동시에 저장하면 나중 쪽을 최신 기록 위에서 다시 처리한다(최대 3번).
+      // 두 사람이 거의 동시에 저장하면 나중 쪽을 최신 기록 위에서 다시 처리한다(최대 5번).
       for (let i = 0; ; i++) {
         const { db, etag } = await store.read();
         const result = Flow.apply(db, body, ORG);                           // 거절이면 여기서 FlowError
         try { await store.write(db, etag); return send(res, 200, { ...result, db }); }
-        catch (e) { if (!isConflict(e) || i >= 2) throw e; }
+        catch (e) { if (!isConflict(e) || i >= 4) throw e; await wait(50 + Math.random() * 200); }
       }
     } catch (e) {
       if (e instanceof Flow.FlowError) return send(res, e.status, { error: e.message });
+      if (isConflict(e)) return send(res, 409, { error: "다른 담당자가 같은 순간에 저장하고 있습니다. 잠시 뒤 다시 눌러 주세요." });
       console.error(e);
       return send(res, 500, { error: "서버 오류: " + (e && e.message) });
     }
