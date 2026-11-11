@@ -26,8 +26,9 @@ function blobStore() {
           addRandomSuffix: false, allowOverwrite: true, ...(etag ? { ifMatch: etag } : {}),
         });
       } catch (e) {
-        // 오류 클래스에 이름이 없어(e.name이 "Error") instanceof로 가린다(11-11 실측).
-        if (e instanceof BlobPreconditionFailedError) e.conflict = true;
+        // 오류 클래스에 이름이 없어(e.name이 "Error") instanceof로 가린다. 저장소가 직접 보내는
+        // 「conflicting operation」(같은 순간 다른 쓰기)도 충돌로 본다(11-11 실측).
+        if (e instanceof BlobPreconditionFailedError || /conflicting operation/i.test(e && e.message)) e.conflict = true;
         throw e;
       }
     },
