@@ -19,27 +19,68 @@
     <div class="scroll"><table><thead><tr><th>위원회</th><th>의원</th><th>제출기한</th><th>문항</th><th>접수</th><th>배분확정</th><th>회신중</th><th>회신완료</th><th>보완요청</th><th>확정</th><th>재배정요청</th></tr></thead><tbody id="byReq"></tbody></table></div>
   </section>
   <section>
-    <h2>최근 처리 기록</h2>
-    <div class="scroll" style="max-height:300px"><table><thead><tr><th>일시</th><th>작업</th><th>문항</th><th>과</th></tr></thead><tbody id="log"></tbody></table></div>
+    <h2>처리 기록 <span class="hint" id="logCount"></span></h2>
+    <div class="row">
+      <label>작업 <select id="fWork"><option value="">전체</option></select></label>
+      <label>과 <select id="fDept"><option value="">전체</option></select></label>
+      <label>문항 <input type="text" id="fCase" placeholder="앞부분, 예: 의원K-01" style="width:170px"></label>
+      <button id="logXlsx">처리 기록 엑셀</button>
+      <span class="hint">골라 본 결과 그대로 내려받습니다. 일시는 한국시간입니다.</span>
+    </div>
+    <div class="scroll" style="max-height:400px"><table><thead><tr><th>일시</th><th>작업</th><th>문항</th><th>과</th><th>지금 상태</th></tr></thead><tbody id="log"></tbody></table></div>
     <div class="row" id="clearRow" style="margin-top:10px"><button id="clear">이 브라우저의 기록 모두 지우기</button><span class="hint">시험할 때만 쓰세요.</span></div>
   </section>
 </main>
+<script src="lib/xlsx.full.min.js"></script>
 <script src="flow.js"></script>
 <script src="common.js"></script>
 <script>
 App.nav("index.html");
 const K = ["접수", "배분확정", "회신중", "회신완료", "보완요청", "확정", "재배정요청"];
+const $ = (id) => document.getElementById(id), e = App.esc;
+let db = { cases: [], log: [] };
+
+// 일시를 한국시간 「YYYY-MM-DD HH:MM」으로. UTC 형식(…Z, +00:00)이면 바꾸고, 이미 한국시간 글자면 그대로 둔다.
+// (flow.js는 저장할 때부터 Asia/Seoul로 적는다. 연결 실습 ①은 서버·flow.js를 고치지 않으므로 화면에서만 맞춘다.)
+function kst(s) {
+  s = String(s ?? "");
+  if (!/T.*(Z|[+-]\d{2}:?\d{2})$/.test(s)) return s;
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }).slice(0, 16);
+}
+const 과목록 = (l) => String(l.과 || "").split(",").map((x) => x.trim()).filter(Boolean);   // 보완요청은 「가과, 나과」
+
+// 골라 보기: 작업(같음) · 과(그 과가 들어 있음) · 문항(앞부분 일치)
+function picked() {
+  const w = $("fWork").value, d = $("fDept").value, q = $("fCase").value.trim();
+  const now = new Map(db.cases.map((c) => [c.id, c.상태]));
+  return db.log.filter((l) => (!w || l.작업 === w) && (!d || 과목록(l).includes(d)) && (!q || String(l.문항).startsWith(q)))
+    .slice().reverse()
+    .map((l) => ({ 일시: kst(l.일시), 작업: l.작업, 문항: l.문항, 과: l.과, 비고: l.비고 || "", 지금상태: now.get(l.문항) || "" }));
+}
+function drawLog() {
+  const rows = picked();
+  $("logCount").textContent = `${rows.length}건 / 전체 ${db.log.length}건`;
+  $("log").innerHTML = rows.map((r) =>
+    `<tr><td class="nowrap">${e(r.일시)}</td><td>${e(r.작업)}</td><td class="nowrap">${e(r.문항)}</td><td>${e(r.과)}${r.비고 ? ` <small class="hint">(${e(r.비고)})</small>` : ""}</td><td>${r.지금상태 ? `<span class="badge st-${e(r.지금상태)}">${e(r.지금상태)}</span>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="hint">${db.log.length ? "고른 조건에 맞는 기록이 없습니다." : "기록 없음"}</td></tr>`;
+  $("logXlsx").disabled = !rows.length;
+}
+function fillFilters() {
+  const keep = (sel, list) => { const v = sel.value; sel.innerHTML = `<option value="">전체</option>` + list.map((x) => `<option ${x === v ? "selected" : ""}>${e(x)}</option>`).join(""); };
+  keep($("fWork"), [...new Set(db.log.map((l) => l.작업))]);
+  keep($("fDept"), [...new Set(db.log.flatMap(과목록))].sort((a, b) => a.localeCompare(b, "ko")));
+}
+
 async function draw() {
-  const e = App.esc;
-  document.getElementById("where").textContent = App.SERVER
+  $("where").textContent = App.SERVER
     ? "기록은 서버(Vercel Blob)에 있어 모든 담당자가 같은 처리 단계를 봅니다."
     : "기록은 지금 이 브라우저에만 저장됩니다. *.vercel.app 주소에서 열면 서버에 함께 저장합니다.";
-  document.getElementById("clearRow").hidden = App.SERVER;
-  let db;
+  $("clearRow").hidden = App.SERVER;
   try { db = await App.load(); }
-  catch (err) { document.getElementById("cards").innerHTML = `<div class="msg err">${e(err.message)}</div>`; return; }
+  catch (err) { $("cards").innerHTML = `<div class="msg err">${e(err.message)}</div>`; return; }
   const n = (s) => db.cases.filter((c) => c.상태 === s).length;
-  document.getElementById("cards").innerHTML =
+  $("cards").innerHTML =
     `<div class="card">전체 문항<b>${db.cases.length}</b></div>` +
     App.STATES.map((s) => `<div class="card"><span class="badge st-${s}">${s}</span><b>${n(s)}</b></div>`).join("");
   const g = new Map();
@@ -48,14 +89,21 @@ async function draw() {
     v.전체++; v[c.상태] = (v[c.상태] || 0) + 1;
     g.set(c.파일명, v);
   }
-  document.getElementById("byReq").innerHTML = [...g.values()].map((v) =>
+  $("byReq").innerHTML = [...g.values()].map((v) =>
     `<tr><td>${e(v.c.위원회)}</td><td>${e(v.c.의원)}</td><td>${e(v.c.제출기한)}</td><td>${v.전체}</td>` + K.map((s) => `<td>${v[s] || 0}</td>`).join("") + `</tr>`).join("")
     || `<tr><td colspan="11" class="hint">아직 접수한 요구서가 없습니다. 「배분」 화면에서 요구서 PDF를 올리세요.</td></tr>`;
-  document.getElementById("log").innerHTML = db.log.slice(-30).reverse().map((l) =>
-    `<tr><td>${e(l.일시)}</td><td>${e(l.작업)}</td><td>${e(l.문항)}</td><td>${e(l.과)}${l.비고 ? ` <small class="hint">(${e(l.비고)})</small>` : ""}</td></tr>`).join("")
-    || `<tr><td colspan="4" class="hint">기록 없음</td></tr>`;
+  fillFilters(); drawLog();
 }
-document.getElementById("clear").onclick = () => {
+$("fWork").onchange = drawLog; $("fDept").onchange = drawLog; $("fCase").oninput = drawLog;
+// [처리 기록 엑셀]: 화면에 골라 본 그대로(열: 일시 · 작업 · 문항 · 과 · 지금상태)
+$("logXlsx").onclick = () => {
+  const rows = picked();
+  const ws = XLSX.utils.aoa_to_sheet([["일시", "작업", "문항", "과", "지금상태"], ...rows.map((r) => [r.일시, r.작업, r.문항, r.과, r.지금상태])]);
+  ws["!cols"] = [{ wch: 17 }, { wch: 10 }, { wch: 11 }, { wch: 28 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "처리기록");
+  XLSX.writeFile(wb, "처리기록_국회요구자료.xlsx");
+};
+$("clear").onclick = () => {
   if (confirm("이 브라우저에 저장된 접수·배분 기록을 모두 지웁니다. 계속할까요?")) { App.clearAll(); draw(); }
 };
 draw();
